@@ -26,6 +26,7 @@ const PACKAGE_ROOT = resolve(here, '..', 'dsh-pet');
 const WEBM_ROOT = join(PACKAGE_ROOT, 'assets', 'webm');
 const CONFIG_FILE = join(PACKAGE_ROOT, 'assets', 'config.jsonc');
 const STATUS_DIR = join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'claude-agent-status');
+const SESSIONS_DIR = join(homedir(), '.claude', 'sessions');
 
 const stripJsonc = (src) =>
   src
@@ -68,16 +69,44 @@ function loadConfig() {
 // 状态文件格式见 dotfiles 的 zellij/scripts/agent-status.sh：第一个字段是状态，\x1f 分隔
 function readStates() {
   if (!existsSync(STATUS_DIR)) return [];
+  const live = liveSessions();
   const states = [];
   for (const name of readdirSync(STATUS_DIR)) {
     if (name.startsWith('.')) continue;
     try {
-      states.push(readFileSync(join(STATUS_DIR, name), 'utf8').split('\x1f')[0]);
+      const file = join(STATUS_DIR, name);
+      // 跳过已经退出的 Claude 留下的记录（1 分钟内新写的先不跳：hook 可能比会话文件先写）。
+      // 这里只跳过不删除，删除由 agent-status.sh 的 render 负责
+      if (live && !live.has(name) && Date.now() - statSync(file).mtimeMs > 60_000) continue;
+      states.push(readFileSync(file, 'utf8').split('\x1f')[0]);
     } catch {
       /* 文件刚好被删：跳过 */
     }
   }
   return states;
+}
+
+// 运行中的 Claude 会话 id。Claude Code 给每个运行中的会话写一个 ~/.claude/sessions/<pid>.json，
+// 里面有 sessionId。这是内部实现，目录不存在时返回 null（不做存活检查）
+function liveSessions() {
+  if (!existsSync(SESSIONS_DIR)) return null;
+  const live = new Set();
+  for (const name of readdirSync(SESSIONS_DIR)) {
+    if (!name.endsWith('.json')) continue;
+    const pid = Number(name.slice(0, -'.json'.length));
+    try {
+      process.kill(pid, 0);
+    } catch (e) {
+      if (e.code !== 'EPERM') continue; // EPERM 说明进程还在，只是不属于我们
+    }
+    try {
+      const { sessionId } = JSON.parse(readFileSync(join(SESSIONS_DIR, name), 'utf8'));
+      if (sessionId) live.add(sessionId);
+    } catch {
+      /* 文件正在写或者刚好被删：跳过 */
+    }
+  }
+  return live;
 }
 
 // 多个 Claude 合并成一个：有人等你 > 有人在跑 > 有人做完 > 空闲
