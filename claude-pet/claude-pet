@@ -1,0 +1,28 @@
+#!/bin/bash
+# claude-pet：在后台运行桌面宠物，显示 Claude Code 的状态
+#   claude-pet start | stop | restart | status | log
+# 环境变量 PET_SIZE 调大小（宽度 px，默认 200）
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/claude-pet"
+PIDFILE="$STATE/pid"
+LOG="$STATE/log"
+mkdir -p "$STATE"
+
+running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+
+case "${1:-start}" in
+  start)
+    if running; then echo "已经在运行（pid $(cat "$PIDFILE")）"; exit 0; fi
+    nohup node "$HERE/server.mjs" >"$LOG" 2>&1 &
+    echo $! >"$PIDFILE"
+    echo "已启动（pid $!），日志：$LOG"
+    ;;
+  stop)
+    if running; then kill "$(cat "$PIDFILE")"; echo "已停止"; else echo "没有在运行"; fi
+    rm -f "$PIDFILE"
+    ;;
+  restart) "$0" stop; sleep 1; "$0" start ;;
+  status) if running; then echo "运行中（pid $(cat "$PIDFILE")）"; else echo "没有在运行"; fi ;;
+  log) tail -n 50 -f "$LOG" ;;
+  *) echo "usage: claude-pet start|stop|restart|status|log" >&2; exit 1 ;;
+esac
