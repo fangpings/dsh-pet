@@ -62,6 +62,8 @@ function loadConfig() {
     },
   ];
   cfg.notificationsEnabled = false;
+  // workStatusTexts 在顶层（宠物条目里也可以有），两处都删掉才不弹气泡
+  delete cfg.workStatusTexts;
   return cfg;
 }
 
